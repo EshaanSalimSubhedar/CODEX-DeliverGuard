@@ -17,7 +17,7 @@
 
 ---
 
-## 📑 Table of Contents
+## Table of Contents
 - [🧩 Problem & Persona](#-1-problem--persona)
 - [🔄 Workflow](#-workflow)
 - [💰 Premium Model & Triggers](#-2-premium-model--parametric-triggers)
