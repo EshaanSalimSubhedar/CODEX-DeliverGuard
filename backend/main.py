@@ -1,117 +1,11 @@
+# ======================= BACKEND (main.py) =======================
+
 from fastapi import FastAPI
 from pydantic import BaseModel
-import random
+from fastapi.middleware.cors import CORSMiddleware
+import requests
 
 app = FastAPI()
-
-# -----------------------------
-# Data Models
-# -----------------------------
-class UserInput(BaseModel):
-    location: str
-
-class ClaimInput(BaseModel):
-    user_id: int
-    trigger_type: str
-    zone: str
-
-# -----------------------------
-# Mock Data (for demo)
-# -----------------------------
-def get_mock_data():
-    return {
-        "rain": random.randint(50, 120),      # mm
-        "aqi": random.randint(100, 400),
-        "temperature": random.randint(30, 45),
-        "flood": random.choice([0, 1]),
-        "curfew": random.choice([0, 1])
-    }
-
-# -----------------------------
-# Risk Score Calculation
-# -----------------------------
-def calculate_risk(data):
-    rain_risk = min(data["rain"] / 100, 1)
-    aqi_risk = min(data["aqi"] / 300, 1)
-    heat_risk = min(data["temperature"] / 40, 1)
-    flood_risk = data["flood"]
-    social_risk = data["curfew"]
-
-    risk_score = (
-            0.3 * rain_risk +
-            0.2 * aqi_risk +
-            0.2 * heat_risk +
-            0.2 * flood_risk +
-            0.1 * social_risk
-    )
-    return round(risk_score, 2)
-
-# -----------------------------
-# Premium Calculation
-# -----------------------------
-def calculate_premium(risk_score):
-    return round(30 + (risk_score * 50), 2)
-
-# -----------------------------
-# Routes
-# -----------------------------
-
-@app.get("/")
-def home():
-    return {"message": "DeliverGuard API Running 🚀"}
-
-# Get risk score + premium
-@app.post("/risk-premium")
-def get_risk_premium(user: UserInput):
-    data = get_mock_data()
-    risk_score = calculate_risk(data)
-    premium = calculate_premium(risk_score)
-
-    return {
-        "location": user.location,
-        "mock_data": data,
-        "risk_score": risk_score,
-        "weekly_premium": premium
-    }
-
-# Trigger check
-@app.get("/check-trigger")
-def check_trigger():
-    data = get_mock_data()
-
-    triggered = []
-    if data["rain"] > 80:
-        triggered.append("Rain")
-    if data["aqi"] > 300:
-        triggered.append("AQI")
-    if data["temperature"] > 40:
-        triggered.append("Heatwave")
-    if data["flood"] == 1:
-        triggered.append("Flood")
-    if data["curfew"] == 1:
-        triggered.append("Curfew")
-
-    return {
-        "data": data,
-        "triggered_events": triggered
-    }
-
-# Claim simulation
-@app.post("/claim")
-def create_claim(claim: ClaimInput):
-    # Simple fraud check (demo logic)
-    if claim.trigger_type not in ["Rain", "AQI", "Heatwave", "Flood", "Curfew"]:
-        return {"status": "Rejected ❌", "reason": "Invalid trigger"}
-
-    return {
-        "status": "Approved ✅",
-        "user_id": claim.user_id,
-        "trigger": claim.trigger_type,
-        "zone": claim.zone,
-        "payout": random.randint(200, 500)
-    }
-
-from fastapi.middleware.cors import CORSMiddleware
 
 app.add_middleware(
     CORSMiddleware,
@@ -120,3 +14,118 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+users = []
+policies = []
+
+API_KEY = "YOUR_OPENWEATHER_API_KEY"
+
+class UserInput(BaseModel):
+    name: str
+    location: str
+    zone: str
+
+class PolicyInput(BaseModel):
+    triggers: list
+    type: str
+
+class ClaimInput(BaseModel):
+    user_id: int
+
+# ---------------- DATA ----------------
+def get_real_data(city):
+    try:
+        url = f"http://api.openweathermap.org/data/2.5/weather?q={city}&appid={API_KEY}&units=metric"
+        res = requests.get(url).json()
+
+        return {
+            "temperature": res["main"]["temp"],
+            "rain": res.get("rain", {}).get("1h", 0),
+            "aqi": 180
+        }
+    except:
+        return {"temperature":35,"rain":5,"aqi":180}
+
+# ---------------- RISK ----------------
+def calculate_risk(data):
+    return round((data["rain"]/10 + data["temperature"]/40 + data["aqi"]/300)/3,2)
+
+# ---------------- REGISTER ----------------
+@app.post("/register")
+def register(user: UserInput):
+    u = {"id": len(users)+1, **user.dict()}
+    users.append(u)
+    return {"user": u}
+
+# ---------------- POLICY ----------------
+@app.post("/create-policy/{user_id}")
+def create_policy(user_id: int, policy: PolicyInput):
+
+    plans = {
+        "Basic": (40,3),
+        "Standard": (50,4),
+        "Premium": (60,5)
+    }
+
+    if policy.type in plans:
+        premium,m = plans[policy.type]
+    else:
+        premium = 30 + len(policy.triggers)*15
+        m = 3 + len(policy.triggers)
+
+    p = {
+        "user_id": user_id,
+        "type": policy.type,
+        "triggers": policy.triggers,
+        "premium": premium,
+        "multiplier": m
+    }
+
+    policies.append(p)
+    return {"policy": p}
+
+# ---------------- CLAIM ----------------
+@app.post("/auto-claim")
+def claim(inp: ClaimInput):
+
+    user = next((u for u in users if u["id"]==inp.user_id), None)
+    policy = next((p for p in policies if p["user_id"]==inp.user_id), None)
+
+    if not user or not policy:
+        return {"status":"error"}
+
+    d = get_real_data(user["location"])
+    r = calculate_risk(d)
+
+    triggered = []
+
+    if "Rain" in policy["triggers"] and d["rain"]>5:
+        triggered.append("Rain")
+
+    if "Heatwave" in policy["triggers"] and d["temperature"]>35:
+        triggered.append("Heatwave")
+
+    if "AQI" in policy["triggers"] and d["aqi"]>300:
+        triggered.append("AQI")
+
+    # ✅ FIX: NO TRIGGERS → NO PAYOUT
+    if not triggered:
+        return {
+            "status":"no_claim",
+            "location":user["location"],
+            "triggers_hit":[],
+            "risk_score":r,
+            "payout":0,
+            "message":"No triggers met"
+        }
+
+    # NORMAL PAYOUT
+    payout = int(policy["premium"]*policy["multiplier"]*(1+r))
+
+    return {
+        "status":"approved",
+        "location":user["location"],
+        "triggers_hit":triggered,
+        "risk_score":r,
+        "payout":payout
+    }
