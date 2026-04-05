@@ -4,7 +4,7 @@ import React, { useState } from "react";
 import { MapContainer, TileLayer, Marker } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 
-const BASE_URL = "http://127.0.0.1:8001";
+const BASE_URL = "https://deliverguard-backend-43e3.onrender.com/";
 
 function App() {
     const [screen,setScreen] = useState("home");
